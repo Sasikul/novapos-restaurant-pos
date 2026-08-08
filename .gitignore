@@ -1,0 +1,12 @@
+node_modules/
+build/
+.env
+.env.*
+npm-debug.log*
+.DS_Store
+Thumbs.db
+_docx_render_check/
+_pdf_render_check/
+.git-local/
+pos-backend/.git-backup/
+pos-frontend/.git-backup/
