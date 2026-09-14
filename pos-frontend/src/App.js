@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import Dashboard from "./pages/Dashboard";
 import CustomerOrder from "./pages/CustomerOrder";
@@ -30,18 +30,32 @@ function App() {
   const canEditMenu = isAdmin || permissions.canEditMenu;
   const canManageKitchen = isAdmin || permissions.canManageKitchen;
 
-  if (isCustomerOrder) {
-    return <CustomerOrder table={customerTable} />;
-  }
-
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
     localStorage.removeItem("name");
     localStorage.removeItem("permissions");
     setToken(null);
     setPage("table");
-  };
+  }, []);
+
+  useEffect(() => {
+    const handleUnauthorized = (event) => {
+      if (event.reason?.response?.status !== 401) return;
+
+      event.preventDefault();
+      logout();
+    };
+
+    window.addEventListener("unhandledrejection", handleUnauthorized);
+    return () => {
+      window.removeEventListener("unhandledrejection", handleUnauthorized);
+    };
+  }, [logout]);
+
+  if (isCustomerOrder) {
+    return <CustomerOrder table={customerTable} />;
+  }
 
   if (!token) {
     return <Login setToken={setToken} />;

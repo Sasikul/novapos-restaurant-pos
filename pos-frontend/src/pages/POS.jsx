@@ -59,6 +59,17 @@ export default function POS({ token, table, goBack }) {
     [getToken]
   );
 
+  const handleAuthExpired = useCallback((error) => {
+    if (error.response?.status !== 401) return false;
+
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    localStorage.removeItem("name");
+    localStorage.removeItem("permissions");
+    window.location.assign(window.location.origin);
+    return true;
+  }, []);
+
   const subtotal = cart.reduce(
     (sum, item) => sum + Number(item.price || 0) * item.qty,
     0
@@ -105,9 +116,9 @@ export default function POS({ token, table, goBack }) {
       );
       setHistory(res.data || []);
     } catch (error) {
-      console.log(error);
+      if (!handleAuthExpired(error)) console.log(error);
     }
-  }, [table, authHeaders]);
+  }, [table, authHeaders, handleAuthExpired]);
 
   const loadOrder = useCallback(async () => {
     if (!table) return;
@@ -137,9 +148,9 @@ export default function POS({ token, table, goBack }) {
         setHistory([]);
       }
     } catch (error) {
-      console.log(error);
+      if (!handleAuthExpired(error)) console.log(error);
     }
-  }, [table, authHeaders]);
+  }, [table, authHeaders, handleAuthExpired]);
 
   useEffect(() => {
     loadMenu();
@@ -204,7 +215,8 @@ export default function POS({ token, table, goBack }) {
     }));
 
   const saveOrder = async (items = cart, options = {}) => {
-    const res = await axios.post(
+    try {
+      const res = await axios.post(
       `${API_BASE_URL}/api/orders`,
       {
         items: buildItemsPayload(items),
@@ -212,14 +224,20 @@ export default function POS({ token, table, goBack }) {
         deletedItemId: options.deletedItemId,
         reason: options.reason,
       },
-      authHeaders()
-    );
+        authHeaders()
+      );
 
     if (!options.silent) alert("บันทึกออเดอร์แล้ว");
     setOrder(res.data);
     setHistory(res.data.history || []);
     loadTableHistory();
-    return res.data;
+      return res.data;
+    } catch (error) {
+      if (!handleAuthExpired(error)) {
+        alert(error.response?.data?.message || "บันทึกออเดอร์ไม่สำเร็จ");
+      }
+      return null;
+    }
   };
 
   const deleteItem = async (id) => {
@@ -297,13 +315,19 @@ export default function POS({ token, table, goBack }) {
       return;
     }
 
-    const res = await axios.put(
-      `${API_BASE_URL}/api/orders/${orderId}/status`,
-      { status },
-      authHeaders()
-    );
-    setOrder(res.data);
-    setHistory(res.data.history || []);
+    try {
+      const res = await axios.put(
+        `${API_BASE_URL}/api/orders/${orderId}/status`,
+        { status },
+        authHeaders()
+      );
+      setOrder(res.data);
+      setHistory(res.data.history || []);
+    } catch (error) {
+      if (!handleAuthExpired(error)) {
+        alert(error.response?.data?.message || "อัปเดตสถานะไม่สำเร็จ");
+      }
+    }
   };
 
   const moveTable = async () => {
@@ -316,13 +340,19 @@ export default function POS({ token, table, goBack }) {
       return;
     }
 
-    await axios.put(
+    try {
+      await axios.put(
       `${API_BASE_URL}/api/orders/${orderId}/move`,
       { targetTable },
-      authHeaders()
-    );
+        authHeaders()
+      );
     alert(`ย้ายไปโต๊ะ ${targetTable} แล้ว`);
-    goBack();
+      goBack();
+    } catch (error) {
+      if (!handleAuthExpired(error)) {
+        alert(error.response?.data?.message || "ย้ายโต๊ะไม่สำเร็จ");
+      }
+    }
   };
 
   const cancelOrder = async () => {
@@ -336,13 +366,19 @@ export default function POS({ token, table, goBack }) {
 
     if (!window.confirm("ยืนยันยกเลิกบิลนี้ใช่ไหม?")) return;
 
-    await axios.delete(`${API_BASE_URL}/api/orders/${orderId}`, {
-      ...authHeaders(),
-      data: { reason },
-    });
+    try {
+      await axios.delete(`${API_BASE_URL}/api/orders/${orderId}`, {
+        ...authHeaders(),
+        data: { reason },
+      });
 
     alert("ยกเลิกบิลแล้ว");
-    goBack();
+      goBack();
+    } catch (error) {
+      if (!handleAuthExpired(error)) {
+        alert(error.response?.data?.message || "ยกเลิกบิลไม่สำเร็จ");
+      }
+    }
   };
 
   const printKitchenTicket = () => {
@@ -493,15 +529,24 @@ export default function POS({ token, table, goBack }) {
       return;
     }
 
-    const res = await axios.put(
-      `${API_BASE_URL}/api/orders/${orderId}/pay`,
-      {
-        discountPercent: discount,
-        cashReceived: paymentMethod === "cash" ? Number(cash) : total,
-        paymentMethod,
-      },
-      authHeaders()
-    );
+    let res;
+
+    try {
+      res = await axios.put(
+        `${API_BASE_URL}/api/orders/${orderId}/pay`,
+        {
+          discountPercent: discount,
+          cashReceived: paymentMethod === "cash" ? Number(cash) : total,
+          paymentMethod,
+        },
+        authHeaders()
+      );
+    } catch (error) {
+      if (!handleAuthExpired(error)) {
+        alert(error.response?.data?.message || "ชำระเงินไม่สำเร็จ");
+      }
+      return;
+    }
 
     const paidOrder = res.data.order;
     const paymentLabel =
