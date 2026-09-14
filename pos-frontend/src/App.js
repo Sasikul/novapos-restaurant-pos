@@ -1,14 +1,22 @@
 import { useState } from "react";
 
 import Dashboard from "./pages/Dashboard";
+import CustomerOrder from "./pages/CustomerOrder";
 import Kitchen from "./pages/Kitchen";
 import Login from "./pages/Login";
 import MenuManager from "./pages/MenuManager";
 import POS from "./pages/POS";
+import TableQR from "./pages/TableQR";
 import Table from "./pages/Table";
 import Users from "./pages/Users";
 
 function App() {
+  const params = new URLSearchParams(window.location.search);
+  const customerTable = Number(params.get("table"));
+  const isCustomerOrder =
+    params.get("customer") === "1" &&
+    Number.isInteger(customerTable) &&
+    customerTable > 0;
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [page, setPage] = useState("table");
   const [selectedTable, setSelectedTable] = useState(null);
@@ -21,6 +29,10 @@ function App() {
   const canManageUsers = isAdmin || permissions.canManageUsers;
   const canEditMenu = isAdmin || permissions.canEditMenu;
   const canManageKitchen = isAdmin || permissions.canManageKitchen;
+
+  if (isCustomerOrder) {
+    return <CustomerOrder table={customerTable} />;
+  }
 
   const logout = () => {
     localStorage.removeItem("token");
@@ -89,6 +101,19 @@ function App() {
             </button>
           )}
 
+          {(isAdmin || canEditMenu) && (
+            <button
+              onClick={() => setPage("qr")}
+              className={`rounded-md px-4 py-2 font-semibold ${
+                page === "qr"
+                  ? "bg-teal-700 text-white shadow-sm"
+                  : "text-slate-700 hover:bg-emerald-50 hover:text-teal-800"
+              }`}
+            >
+              QR โต๊ะ
+            </button>
+          )}
+
           {canManageUsers && (
             <button
               onClick={() => setPage("users")}
@@ -143,6 +168,7 @@ function App() {
       )}
       {page === "users" && canManageUsers && <Users token={token} />}
       {page === "menu" && canEditMenu && <MenuManager token={token} />}
+      {page === "qr" && (isAdmin || canEditMenu) && <TableQR />}
     </div>
   );
 }

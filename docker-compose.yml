@@ -26,7 +26,7 @@ services:
     build:
       context: ./pos-frontend
       args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-/api}
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-}
     container_name: novapos-frontend
     restart: unless-stopped
     depends_on:

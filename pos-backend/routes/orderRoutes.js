@@ -80,6 +80,26 @@ const normalizeItems = (items = []) =>
     }))
     .filter((item) => item.quantity > 0);
 
+const mergeOrderItems = (oldItems = [], newItems = []) => {
+  const itemMap = new Map();
+
+  [...oldItems, ...newItems].forEach((item) => {
+    const menu = getMenuId(item);
+    const note = String(item.note || "").trim();
+    const key = `${menu}::${note}`;
+    const current = itemMap.get(key) || {
+      menu,
+      quantity: 0,
+      note,
+    };
+
+    current.quantity += Number(item.quantity) || 0;
+    itemMap.set(key, current);
+  });
+
+  return [...itemMap.values()].filter((item) => item.quantity > 0);
+};
+
 const loadMenuMap = async (items) => {
   const ids = [...new Set(items.map((item) => getMenuId(item)))];
   const menus = await Menu.find({
@@ -566,6 +586,110 @@ router.get(
     }
   }
 );
+
+router.get("/customer/table/:table", async (req, res) => {
+  try {
+    const table = Number(req.params.table);
+
+    if (!Number.isInteger(table) || table < 1) {
+      return res.status(400).json({ message: "Invalid table number" });
+    }
+
+    const order = await getActiveOrderForTable(table);
+    res.json(order || null);
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
+router.post("/customer", async (req, res) => {
+  try {
+    const table = Number(req.body.table);
+    const customerName = String(req.body.customerName || "").trim();
+    const user = customerName || "QR Customer";
+    const incomingItems = normalizeItems(req.body.items);
+
+    if (!Number.isInteger(table) || table < 1) {
+      return res.status(400).json({ message: "Invalid table number" });
+    }
+
+    if (incomingItems.length === 0) {
+      return res.status(400).json({ message: "Please select at least one item" });
+    }
+
+    const menuMap = await loadMenuMap(incomingItems);
+    const missingItem = incomingItems.find((item) => !menuMap.has(getMenuId(item)));
+
+    if (missingItem) {
+      return res.status(400).json({ message: "Some menu items were not found" });
+    }
+
+    let order = await getActiveOrderForTable(table);
+    const mergedItems = order
+      ? mergeOrderItems(order.items, incomingItems)
+      : incomingItems;
+    const mergedMenuMap = await loadMenuMap(mergedItems);
+    const totalPrice = calculateTotalPrice(mergedItems, mergedMenuMap);
+    const itemHistory = incomingItems.map((item) => {
+      const menuName = getMenuName(item, menuMap);
+
+      return createHistory({
+        action: "QR_ORDER_ITEM",
+        user,
+        table,
+        menuName,
+        quantity: item.quantity,
+        detail: `QR order: ${menuName} x ${item.quantity}${
+          item.note ? ` (${item.note})` : ""
+        }`,
+      });
+    });
+
+    if (order) {
+      order.items = mergedItems;
+      order.totalPrice = totalPrice;
+      order.subtotal = totalPrice;
+      if (order.status === "served") order.status = "pending";
+      order.history.push(
+        createHistory({
+          action: "QR_ORDER",
+          user,
+          table,
+          detail: `Customer submitted QR order for table ${table}`,
+        }),
+        ...itemHistory
+      );
+
+      await order.save();
+      await order.populate("items.menu");
+      return res.status(201).json(order);
+    }
+
+    order = await Order.create({
+      table,
+      items: incomingItems,
+      totalPrice,
+      subtotal: totalPrice,
+      status: "pending",
+      history: [
+        createHistory({
+          action: "QR_ORDER",
+          user,
+          table,
+          detail: `Customer opened order by QR for table ${table}`,
+        }),
+        ...itemHistory,
+      ],
+    });
+
+    await order.populate("items.menu");
+    res.status(201).json(order);
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: error.message });
+  }
+});
 
 router.get("/", protect, async (req, res) => {
   try {
