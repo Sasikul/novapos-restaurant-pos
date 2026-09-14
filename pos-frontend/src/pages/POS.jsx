@@ -44,6 +44,8 @@ export default function POS({ token, table, goBack }) {
   const [receipt, setReceipt] = useState(null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("ทั้งหมด");
+  const [priceEditorItemId, setPriceEditorItemId] = useState("");
+  const [priceEditorValue, setPriceEditorValue] = useState("");
 
   const getToken = useCallback(
     () => token || localStorage.getItem("token"),
@@ -78,6 +80,8 @@ export default function POS({ token, table, goBack }) {
   const total = subtotal - discountAmount;
   const change = paymentMethod === "cash" ? Number(cash || 0) - total : 0;
   const orderId = order?._id;
+  const isAdmin = role === "admin";
+  const priceEditorItem = cart.find((item) => item._id === priceEditorItemId);
 
   const categories = useMemo(
     () => [
@@ -135,7 +139,13 @@ export default function POS({ token, table, goBack }) {
           res.data.items.map((item) => ({
             _id: item.menu?._id,
             name: item.menu?.name,
-            price: item.menu?.price,
+            price: Number.isFinite(Number(item.customPrice))
+              ? Number(item.customPrice)
+              : item.menu?.price,
+            basePrice: item.menu?.price,
+            customPrice: Number.isFinite(Number(item.customPrice))
+              ? Number(item.customPrice)
+              : undefined,
             category: item.menu?.category,
             qty: item.quantity,
             note: item.note || "",
@@ -174,7 +184,17 @@ export default function POS({ token, table, goBack }) {
         );
       }
 
-      return [...current, { ...item, qty: 1, note: "" }];
+      return [
+        ...current,
+        {
+          ...item,
+          price: item.price,
+          basePrice: item.basePrice ?? item.price,
+          customPrice: item.customPrice,
+          qty: 1,
+          note: "",
+        },
+      ];
     });
   };
 
@@ -212,7 +232,49 @@ export default function POS({ token, table, goBack }) {
       menu: item._id,
       quantity: item.qty,
       note: item.note || "",
+      customPrice: item.customPrice,
     }));
+
+  const openPriceEditor = (item) => {
+    setPriceEditorItemId(item._id);
+    setPriceEditorValue(String(item.price ?? ""));
+  };
+
+  const applyCustomPrice = () => {
+    if (!priceEditorItem) {
+      alert("กรุณาเลือกรายการก่อนแก้ราคา");
+      return;
+    }
+
+    const nextPrice = Number(priceEditorValue);
+    if (!Number.isFinite(nextPrice) || nextPrice < 0) {
+      alert("ราคาต้องเป็นตัวเลขและห้ามติดลบ");
+      return;
+    }
+
+    setCart((current) =>
+      current.map((item) =>
+        item._id === priceEditorItemId
+          ? { ...item, price: nextPrice, customPrice: nextPrice }
+          : item
+      )
+    );
+  };
+
+  const resetCustomPrice = () => {
+    if (!priceEditorItem) return;
+
+    const basePrice = priceEditorItem.basePrice ?? priceEditorItem.price;
+
+    setCart((current) =>
+      current.map((item) =>
+        item._id === priceEditorItemId
+          ? { ...item, price: basePrice, customPrice: undefined }
+          : item
+      )
+    );
+    setPriceEditorValue(String(basePrice ?? ""));
+  };
 
   const saveOrder = async (items = cart, options = {}) => {
     try {
@@ -657,6 +719,11 @@ export default function POS({ token, table, goBack }) {
                   <p className="text-sm text-slate-500">
                     {money(item.price)} บาท
                   </p>
+                  {Number.isFinite(Number(item.customPrice)) && (
+                    <p className="mt-1 rounded-md bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-800">
+                      ราคาแก้เฉพาะบิลนี้ จาก {money(item.basePrice)} บาท
+                    </p>
+                  )}
                   {item.note && (
                     <p className="mt-1 rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
                       หมายเหตุ: {item.note}
@@ -686,6 +753,14 @@ export default function POS({ token, table, goBack }) {
                 >
                   หมายเหตุ
                 </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => openPriceEditor(item)}
+                    className="rounded-md bg-sky-700 px-3 py-2 text-sm font-bold text-white"
+                  >
+                    แก้ราคา
+                  </button>
+                )}
                 {canDeleteItem && (
                   <button
                     onClick={() => deleteItem(item._id)}
@@ -700,6 +775,73 @@ export default function POS({ token, table, goBack }) {
         </div>
 
         <div className="mt-4 space-y-3 border-t border-slate-200 pt-4">
+          {isAdmin && (
+            <div className="rounded-lg border border-sky-100 bg-sky-50/70 p-3">
+              <div className="mb-3">
+                <p className="font-bold text-sky-950">แก้ราคาเฉพาะโต๊ะนี้</p>
+                <p className="mt-1 text-xs font-semibold text-sky-700">
+                  ใช้สำหรับปรับราคาในบิลลูกค้า ไม่เปลี่ยนราคาเมนูหลัก
+                </p>
+              </div>
+
+              <label className="block">
+                <span className="text-sm font-bold">เลือกรายการ</span>
+                <select
+                  value={priceEditorItemId}
+                  onChange={(event) => {
+                    const selectedId = event.target.value;
+                    const selectedItem = cart.find((item) => item._id === selectedId);
+                    setPriceEditorItemId(selectedId);
+                    setPriceEditorValue(String(selectedItem?.price ?? ""));
+                  }}
+                  className="mt-1 w-full rounded-md border border-slate-300 bg-white p-3"
+                >
+                  <option value="">เลือกรายการในบิล</option>
+                  {cart.map((item) => (
+                    <option key={item._id} value={item._id}>
+                      {item.name} - {money(item.price)} บาท
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                <label className="block">
+                  <span className="text-sm font-bold">ราคาใหม่</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={priceEditorValue}
+                    onChange={(event) => setPriceEditorValue(event.target.value)}
+                    placeholder="ใส่ราคาใหม่"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white p-3"
+                  />
+                </label>
+                <button
+                  onClick={applyCustomPrice}
+                  disabled={!priceEditorItem}
+                  className="mt-6 rounded-md bg-sky-700 px-4 font-bold text-white hover:bg-sky-800 disabled:bg-slate-300"
+                >
+                  ใช้ราคา
+                </button>
+              </div>
+
+              {priceEditorItem && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-3 text-sm">
+                  <span className="font-semibold text-slate-600">
+                    ราคาปกติ {money(priceEditorItem.basePrice ?? priceEditorItem.price)} บาท
+                  </span>
+                  <button
+                    onClick={resetCustomPrice}
+                    className="rounded-md border border-slate-300 px-3 py-2 font-bold text-slate-700"
+                  >
+                    คืนราคาปกติ
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => saveOrder()}

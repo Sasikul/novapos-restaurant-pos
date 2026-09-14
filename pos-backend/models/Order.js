@@ -17,6 +17,10 @@ const orderItemSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    customPrice: {
+      type: Number,
+      min: 0,
+    },
   },
   { _id: false }
 );
@@ -30,6 +34,8 @@ const historySchema = new mongoose.Schema(
     quantity: Number,
     beforeQuantity: Number,
     afterQuantity: Number,
+    beforePrice: Number,
+    afterPrice: Number,
     table: Number,
     fromTable: Number,
     toTable: Number,

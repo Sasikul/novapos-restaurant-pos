@@ -49,6 +49,8 @@ const createHistory = ({
   quantity,
   beforeQuantity,
   afterQuantity,
+  beforePrice,
+  afterPrice,
   fromTable,
   toTable,
   reason,
@@ -61,6 +63,8 @@ const createHistory = ({
   quantity,
   beforeQuantity,
   afterQuantity,
+  beforePrice,
+  afterPrice,
   fromTable,
   toTable,
   reason,
@@ -73,11 +77,20 @@ const getMenuId = (item) => String(item.menu?._id || item.menu);
 const normalizeItems = (items = []) =>
   items
     .filter((item) => item.menu)
-    .map((item) => ({
-      menu: item.menu,
-      quantity: Number(item.quantity) || 0,
-      note: String(item.note || "").trim(),
-    }))
+    .map((item) => {
+      const customPrice = Number(item.customPrice);
+      const normalizedItem = {
+        menu: item.menu,
+        quantity: Number(item.quantity) || 0,
+        note: String(item.note || "").trim(),
+      };
+
+      if (Number.isFinite(customPrice) && customPrice >= 0) {
+        normalizedItem.customPrice = customPrice;
+      }
+
+      return normalizedItem;
+    })
     .filter((item) => item.quantity > 0);
 
 const mergeOrderItems = (oldItems = [], newItems = []) => {
@@ -94,6 +107,9 @@ const mergeOrderItems = (oldItems = [], newItems = []) => {
     };
 
     current.quantity += Number(item.quantity) || 0;
+    if (Number.isFinite(Number(item.customPrice))) {
+      current.customPrice = Number(item.customPrice);
+    }
     itemMap.set(key, current);
   });
 
@@ -117,9 +133,11 @@ const getMenuName = (item, menuMap) =>
   "ไม่พบเมนู";
 
 const getMenuPrice = (item, menuMap) =>
-  item.menu?.price ||
-  menuMap.get(getMenuId(item))?.price ||
-  0;
+  Number.isFinite(Number(item.customPrice))
+    ? Number(item.customPrice)
+    : item.menu?.price ||
+      menuMap.get(getMenuId(item))?.price ||
+      0;
 
 const calculateTotalPrice = (items, menuMap) =>
   items.reduce(
@@ -237,6 +255,23 @@ const buildItemChangeHistory = ({
         })
       );
     }
+
+    if (oldItem && getMenuPrice(oldItem, menuMap) !== getMenuPrice(item, menuMap)) {
+      const beforePrice = getMenuPrice(oldItem, menuMap);
+      const afterPrice = getMenuPrice(item, menuMap);
+
+      history.push(
+        createHistory({
+          action: "UPDATE_PRICE",
+          user,
+          table,
+          menuName,
+          beforePrice,
+          afterPrice,
+          detail: `แก้ราคา ${menuName} จาก ${beforePrice} เป็น ${afterPrice} บาท`,
+        })
+      );
+    }
   });
 
   oldItems.forEach((item) => {
@@ -324,7 +359,7 @@ const summarizeOrders = async ({ start, end }) => {
         revenue: 0,
       };
       const quantity = item.quantity || 0;
-      const price = item.menu?.price || 0;
+      const price = getMenuPrice(item, new Map());
 
       current.quantity += quantity;
       current.revenue += quantity * price;
@@ -455,7 +490,7 @@ router.get(
                 (item) =>
                   `${item.menu?.name || "Unknown"} x${item.quantity}${
                     item.note ? ` (${item.note})` : ""
-                  }`
+                  } @${getMenuPrice(item, new Map())}`
               )
               .join("; "),
           ]
@@ -608,7 +643,10 @@ router.post("/customer", async (req, res) => {
     const table = Number(req.body.table);
     const customerName = String(req.body.customerName || "").trim();
     const user = customerName || "QR Customer";
-    const incomingItems = normalizeItems(req.body.items);
+    const incomingItems = normalizeItems(req.body.items).map((item) => {
+      const { customPrice, ...safeItem } = item;
+      return safeItem;
+    });
 
     if (!Number.isInteger(table) || table < 1) {
       return res.status(400).json({ message: "Invalid table number" });
@@ -704,11 +742,35 @@ router.post("/", protect, async (req, res) => {
   try {
     const table = Number(req.body.table);
     const user = getActor(req);
-    const items = normalizeItems(req.body.items);
+    let items = normalizeItems(req.body.items).map((item) => {
+      if (req.user?.role === "admin") return item;
+
+      const { customPrice, ...safeItem } = item;
+      return safeItem;
+    });
     const deletedItemId = req.body.deletedItemId;
     const deleteReason = req.body.reason;
 
     let order = await getActiveOrderForTable(table);
+
+    if (order && req.user?.role !== "admin") {
+      const existingPriceMap = new Map(
+        order.items.map((item) => [
+          `${getMenuId(item)}::${String(item.note || "").trim()}`,
+          item.customPrice,
+        ])
+      );
+
+      items = items.map((item) => {
+        const customPrice = existingPriceMap.get(
+          `${getMenuId(item)}::${String(item.note || "").trim()}`
+        );
+
+        return Number.isFinite(Number(customPrice))
+          ? { ...item, customPrice: Number(customPrice) }
+          : item;
+      });
+    }
 
     if (items.length === 0) {
       if (!order) {
